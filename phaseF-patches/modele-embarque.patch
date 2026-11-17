@@ -1,0 +1,201 @@
+diff --git a/Android/src/app/build.gradle.kts b/Android/src/app/build.gradle.kts
+index cbcb868..e988e08 100644
+--- a/Android/src/app/build.gradle.kts
++++ b/Android/src/app/build.gradle.kts
+@@ -67,6 +67,15 @@ android {
+     buildConfig = true
+   }
+   packaging { jniLibs { pickFirsts.add("**/liblitertlm_jni.so") } }
++  androidResources {
++    // PHASE F9 (chantier Anir) : le modèle embarqué (assets/modeles/*.litertlm,
++    // 2 588 147 712 octets) doit rester STOCKÉ sans compression dans l'APK.
++    // La compression DEFLATE d'un asset de cette taille est le chemin
++    // d'échec connu de l'empaqueteur Android ; en stockage direct, la copie
++    // en flux au premier lancement (biblio/ModeleEmbarque.kt) lit l'asset
++    // tel quel. Pratique documentée pour ce même fichier de modèle.
++    noCompress += listOf("litertlm")
++  }
+ }
+ 
+ kotlin {
+diff --git a/Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt b/Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt
+index 62adff2..77a4d3f 100644
+--- a/Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt
++++ b/Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt
+@@ -20,6 +20,7 @@ import android.app.Application
+ import android.os.Process
+ import android.util.Log
+ import com.google.ai.edge.gallery.biblio.BiblioRouteur
++import com.google.ai.edge.gallery.biblio.ModeleEmbarque
+ import com.google.ai.edge.gallery.data.DataStoreRepository
+ import com.google.ai.edge.gallery.notifications.NotificationScheduleManager
+ import com.google.ai.edge.gallery.services.tts.TtsMemoryTrimCallbacks
+@@ -71,6 +72,14 @@ class GalleryApplication : Application() {
+     // (copie de l'asset + chargement de l'index inversé) sur un fil
+     // d'arrière-plan, pour que la première question n'attende pas.
+     Thread { BiblioRouteur.precharger(applicationContext) }.start()
++
++    // PHASE F9 (chantier Anir) : le modèle Gemma 4 E2B est EMBARQUÉ dans
++    // l'APK (asset modeles/) — copie vers le répertoire des imports et
++    // enregistrement automatique, sur un fil d'arrière-plan, dès le premier
++    // lancement : aucun import manuel, aucun téléchargement (l'APK n'a pas
++    // la permission INTERNET). Idempotent : ne fait rien si le modèle est
++    // déjà en place et enregistré. Voir biblio/ModeleEmbarque.kt.
++    Thread { ModeleEmbarque.preparer(applicationContext, dataStoreRepository) }.start()
+   }
+ 
+   companion object {
+diff --git a/Android/src/app/src/main/java/com/google/ai/edge/gallery/biblio/ModeleEmbarque.kt b/Android/src/app/src/main/java/com/google/ai/edge/gallery/biblio/ModeleEmbarque.kt
+new file mode 100644
+index 0000000..7b2d7c5
+--- /dev/null
++++ b/Android/src/app/src/main/java/com/google/ai/edge/gallery/biblio/ModeleEmbarque.kt
+@@ -0,0 +1,148 @@
++/*
++ * Assistant Médical — pour Anir · Phase F9 (chantier propre, hors code Google).
++ *
++ * Modèle Gemma 4 E2B EMBARQUÉ dans l'APK (asset `modeles/gemma-4-E2B-it.litertlm`,
++ * 2 588 147 712 octets, fichier officiel litert-community dont l'empreinte
++ * SHA-256 est celle de la liste de modèles du squelette). Au premier lancement,
++ * ce préparateur reproduit EXACTEMENT ce que fait l'import manuel du squelette
++ * (ui/modelmanager/ModelImportDialog.kt, fonction importModel) :
++ *
++ *   1. copie EN FLUX de l'asset vers `<stockage modèles>/__imports/<nom du
++ *      fichier>` — jamais openFd (asset de plus de 2 Go) ; copie d'abord dans
++ *      un fichier `.part` du même répertoire, vérification de la taille finale,
++ *      puis renommage : une copie interrompue (arrêt de l'app, batterie) ne
++ *      laisse jamais un fichier tronqué à la place définitive et est reprise
++ *      au lancement suivant ;
++ *   2. enregistrement dans le même registre que l'import manuel (proto
++ *      Settings, champ imported_model, via DataStoreRepository) avec les mêmes
++ *      champs que le dialogue d'import : type LLM, supportImage = true,
++ *      supportAudio = true, accélérateur CPU, maxTokens 1024, topK 64,
++ *      topP 0.95, température 1.0, url vide (modèle local).
++ *
++ * Idempotent : si le fichier est en place à la bonne taille ET l'entrée de
++ * registre existe, ne fait rien. Auto-réparateur par conception : si l'entrée
++ * ou le fichier a disparu (suppression depuis l'écran Modèles, nettoyage du
++ * stockage), le modèle — sans lequel cette application ne sert à rien — est
++ * recopié et réenregistré au lancement suivant.
++ *
++ * À appeler sur un fil d'arrière-plan (les lectures/écritures du registre sont
++ * bloquantes : DataStoreRepository utilise runBlocking). Aucune exception ne
++ * remonte : un échec est journalisé et retenté au prochain lancement, il ne
++ * doit jamais empêcher l'application de démarrer.
++ */
++
++package com.google.ai.edge.gallery.biblio
++
++import android.content.Context
++import android.util.Log
++import com.google.ai.edge.gallery.common.getModelStorageDir
++import com.google.ai.edge.gallery.data.DataStoreRepository
++import com.google.ai.edge.gallery.data.IMPORTS_DIR
++import com.google.ai.edge.gallery.proto.importedModel
++import com.google.ai.edge.gallery.proto.llmConfig
++import java.io.File
++import java.io.FileOutputStream
++
++object ModeleEmbarque {
++
++  private const val TAG = "ModeleEmbarque"
++
++  /** Chemin de l'asset dans l'APK (dossier assets/modeles/). */
++  private const val ASSET_MODELE = "modeles/gemma-4-E2B-it.litertlm"
++
++  /** Nom du fichier une fois copié — identique au nom qu'aurait un import manuel. */
++  private const val NOM_FICHIER = "gemma-4-E2B-it.litertlm"
++
++  /** Taille exacte du fichier officiel (liste de modèles du squelette, sizeInBytes). */
++  private const val TAILLE_ATTENDUE = 2_588_147_712L
++
++  /**
++   * Prépare le modèle embarqué : copie de l'asset si nécessaire, puis
++   * enregistrement si absent du registre. Bloquant — fil d'arrière-plan requis.
++   */
++  fun preparer(context: Context, dataStoreRepository: DataStoreRepository) {
++    try {
++      val importsDir = File(getModelStorageDir(context), IMPORTS_DIR)
++      val destination = File(importsDir, NOM_FICHIER)
++
++      // 1. Fichier : copie seulement s'il est absent ou de taille inexacte.
++      if (!destination.isFile || destination.length() != TAILLE_ATTENDUE) {
++        if (!copierAsset(context, importsDir, destination)) {
++          Log.w(TAG, "Copie du modèle embarqué incomplète — nouvel essai au prochain lancement.")
++          return
++        }
++      }
++
++      // 2. Registre : inscription identique à un import manuel, si absente.
++      val enregistres = dataStoreRepository.readImportedModels()
++      if (enregistres.any { it.fileName == NOM_FICHIER }) {
++        Log.d(TAG, "Modèle embarqué déjà en place et enregistré.")
++        return
++      }
++      val info =
++        importedModel {
++          fileName = NOM_FICHIER
++          fileSize = TAILLE_ATTENDUE
++          url = ""
++          llmConfig =
++            llmConfig {
++              compatibleAccelerators += listOf("CPU")
++              defaultMaxTokens = 1024
++              defaultTopk = 64
++              defaultTopp = 0.95f
++              defaultTemperature = 1.0f
++              supportImage = true
++              supportAudio = true
++            }
++        }
++      val maj = enregistres.toMutableList()
++      maj.add(info)
++      dataStoreRepository.saveImportedModels(maj)
++      Log.i(TAG, "Modèle embarqué enregistré : $NOM_FICHIER ($TAILLE_ATTENDUE octets)")
++    } catch (e: Exception) {
++      Log.e(TAG, "Préparation du modèle embarqué en échec (non fatal)", e)
++    }
++  }
++
++  /**
++   * Copie l'asset en flux vers un fichier `.part` du répertoire des imports,
++   * vérifie la taille finale, puis renomme à la place définitive (même
++   * répertoire : renommage atomique). Retourne vrai si le fichier définitif
++   * est en place à la taille attendue.
++   */
++  private fun copierAsset(context: Context, importsDir: File, destination: File): Boolean {
++    if (!importsDir.exists()) {
++      importsDir.mkdirs()
++    }
++    val partiel = File(importsDir, "$NOM_FICHIER.part")
++    try {
++      context.assets.open(ASSET_MODELE).use { entree ->
++        FileOutputStream(partiel).use { sortie ->
++          val tampon = ByteArray(1024 * 1024)
++          var lus: Int
++          while (entree.read(tampon).also { lus = it } != -1) {
++            sortie.write(tampon, 0, lus)
++          }
++        }
++      }
++    } catch (e: Exception) {
++      Log.e(TAG, "Copie de l'asset modèle interrompue", e)
++      partiel.delete()
++      return false
++    }
++    if (partiel.length() != TAILLE_ATTENDUE) {
++      Log.w(TAG, "Taille après copie inattendue : ${partiel.length()} au lieu de $TAILLE_ATTENDUE")
++      partiel.delete()
++      return false
++    }
++    if (destination.exists()) {
++      destination.delete()
++    }
++    if (!partiel.renameTo(destination)) {
++      // Repli (ne devrait pas arriver dans le même répertoire) : copie directe.
++      partiel.copyTo(destination, overwrite = true)
++      partiel.delete()
++    }
++    return destination.isFile && destination.length() == TAILLE_ATTENDUE
++  }
++}
