@@ -1,0 +1,56 @@
+diff --git a/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/modelmanager/ModelManagerViewModel.kt b/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/modelmanager/ModelManagerViewModel.kt
+index 8f46ae4..69a16af 100644
+--- a/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/modelmanager/ModelManagerViewModel.kt
++++ b/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/modelmanager/ModelManagerViewModel.kt
+@@ -2158,12 +2158,21 @@ constructor(
+           val data = getJsonResponse<ModelAllowlist>(url = url)
+           modelAllowlist = data?.jsonObj
+ 
+-          if (modelAllowlist == null) {
+-            Log.w(TAG, "Failed to load model allowlist from internet. Trying to load it from disk")
+-            modelAllowlist = readModelAllowlistFromDisk()
+-          } else {
++          if (modelAllowlist != null) {
+             Log.d(TAG, "Done: loading model allowlist from internet")
+             saveModelAllowlistToDisk(modelAllowlistContent = data?.textContent ?: "{}")
++          } else {
++            Log.w(TAG, "Failed to load model allowlist from internet. Trying to load it from disk")
++            modelAllowlist = readModelAllowlistFromDisk()
++            if (modelAllowlist == null) {
++              // PHASE B (chantier Anir) : l'application finale est 100 % hors-ligne
++              // (permission INTERNET retirée) — dernier repli sur la liste de
++              // modèles EMBARQUÉE dans les assets (liste officielle 1.0.23 figée).
++              // Sans ce repli, une installation neuve sans réseau échouerait ici
++              // et même les modèles importés localement ne seraient pas chargés.
++              Log.w(TAG, "No allowlist from internet or disk. Using the bundled asset (offline).")
++              modelAllowlist = readModelAllowlistFromAssets()
++            }
+           }
+         }
+ 
+@@ -2350,6 +2359,25 @@ constructor(
+     return null
+   }
+ 
++  /**
++   * PHASE B (chantier Anir) : lit la liste de modèles embarquée dans les assets
++   * (même nom de fichier que la copie disque, même analyse Gson que
++   * [readModelAllowlistFromDisk]). C'est le repli qui rend l'application
++   * utilisable à froid, sans réseau et sans copie disque préalable.
++   */
++  private fun readModelAllowlistFromAssets(): ModelAllowlist? {
++    try {
++      Log.d(TAG, "Reading model allowlist from assets: $MODEL_ALLOWLIST_FILENAME")
++      val content =
++        context.assets.open(MODEL_ALLOWLIST_FILENAME).bufferedReader().use { it.readText() }
++      val gson = Gson()
++      return gson.fromJson(content, ModelAllowlist::class.java)
++    } catch (e: Exception) {
++      Log.e(TAG, "failed to read model allowlist from assets", e)
++      return null
++    }
++  }
++
+   private fun createEmptyUiState(): ModelManagerUiState {
+     return ModelManagerUiState(
+       tasks = listOf(),
