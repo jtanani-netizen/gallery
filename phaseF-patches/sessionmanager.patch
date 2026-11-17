@@ -1,0 +1,32 @@
+diff --git a/Android/src/app/src/main/java/com/google/ai/edge/gallery/agent/sessions/DefaultLlmSessionManager.kt b/Android/src/app/src/main/java/com/google/ai/edge/gallery/agent/sessions/DefaultLlmSessionManager.kt
+index 01fce80..c692fa5 100644
+--- a/Android/src/app/src/main/java/com/google/ai/edge/gallery/agent/sessions/DefaultLlmSessionManager.kt
++++ b/Android/src/app/src/main/java/com/google/ai/edge/gallery/agent/sessions/DefaultLlmSessionManager.kt
+@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery.agent.sessions
+ import android.content.Context
+ import android.graphics.Bitmap
+ import android.util.Log
++import com.google.ai.edge.gallery.biblio.BiblioRouteur
+ import com.google.ai.edge.gallery.data.ChatSessionRepository
+ import com.google.ai.edge.gallery.data.Config
+ import com.google.ai.edge.gallery.data.Model
+@@ -388,9 +389,18 @@ constructor(
+       onError("Model not initialized.")
+       return
+     }
++    // PHASE B (chantier Anir) — point d'étranglement unique de l'inférence
++    // conversationnelle : AVANT l'appel au modèle, le routeur bibliothèque
++    // cherche dans la bibliothèque médicale locale ; si le score dépasse le
++    // seuil calibré, les meilleurs passages (avec le titre de leur document
++    // source) sont injectés en contexte dans le prompt. L'historique persisté
++    // n'est pas touché : seule la requête d'inférence est enrichie.
++    // Voir biblio/BiblioRouteur.kt (et le point de décision produit A/B qui
++    // s'y trouve, PLAN.md §6 — non tranché).
++    val inputEnrichi = BiblioRouteur.enrichir(context, input)
+     model.runtimeHelper.runInference(
+       model = model,
+-      input = input,
++      input = inputEnrichi,
+       images = images,
+       audioClips = audioClips,
+       extraContext = extraContext,
