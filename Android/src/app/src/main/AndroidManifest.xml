@@ -19,31 +19,44 @@
     package="com.google.ai.edge.gallery"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+      PHASE B (chantier Anir) — application 100 % HORS-LIGNE.
+      Permissions CONSERVÉES (strict nécessaire au fonctionnement local) :
+      caméra (photo des boîtes / ask-image), micro (dictée et ask-audio),
+      images de la galerie (pièces jointes photo). Tout le reste est retiré :
+      les déclarations du squelette sont supprimées ci-dessous ET chaque
+      permission est en plus marquée tools:node="remove" pour empêcher les
+      bibliothèques (Firebase, Play Services, Media3…) de la réintroduire
+      par fusion de manifeste. INTERNET en tête : sans elle, aucun envoi
+      réseau n'est possible, par construction.
+    -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_CALENDAR" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="com.google.android.apps.aicore.service.BIND_SERVICE" />
 
-    <!-- Additional permission required for push notification handling -->
-    <!-- Required for resurfacing notifications after boot -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Required for GCM message handling -->
-    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
-    <!-- Required for registering with Chime properly -->
-    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
-    <!-- Required before JellyBean MR1, optional for newer versions of Android. -->
-    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <!-- Réseau et télémétrie : retirés. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" tools:node="remove" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+    <uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE" tools:node="remove" />
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" tools:node="remove" />
+    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" tools:node="remove" />
+    <uses-permission android:name="com.google.android.apps.aicore.service.BIND_SERVICE" tools:node="remove" />
+    <!-- Données personnelles hors périmètre médical : retirées. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" tools:node="remove" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <!-- Arrière-plan et notifications (téléchargements/relances réseau) : retirés. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" tools:node="remove" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -58,7 +71,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="${appIcon}"
-        android:label="Edge Gallery"
+        android:label="Assistant Médical"
         android:roundIcon="${appIcon}"
         android:supportsRtl="true"
         android:theme="@style/Theme.Gallery"
@@ -122,6 +135,22 @@
             android:exported="false"
             tools:node="merge">
         </service>
+
+        <!--
+          PHASE C (chantier Anir) : le FirebaseInitProvider déclaré par la
+          bibliothèque firebase-common s'exécute AVANT Application.onCreate
+          et appelle FirebaseApp.initializeApp() : cet APK ne contenant
+          aucune configuration Firebase (aucune ressource google_app_id),
+          il levait IllegalStateException et tuait le processus avant
+          toute fenêtre (plantage au démarrage du 2026-11-16). On le
+          retire du manifeste fusionné ; l'initialisation Firebase
+          éventuelle reste assurée, protégée par try/catch, dans
+          GalleryApplication.onCreate.
+        -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
 
         <!-- For Firebase Analytics. -->
         <receiver
