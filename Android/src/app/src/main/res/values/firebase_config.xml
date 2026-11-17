@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PHASE D1 — Configuration Firebase structurellement valide (valeurs fictives).
+
+  Contexte : l'APK des phases B/C ne contient AUCUNE ressource de
+  configuration Firebase, alors que l'APK officiel Google (même base,
+  tag 1.0.23) en contient une complète (audit rapports/phaseD.md, §3).
+  Sans ces ressources, FirebaseApp.initializeApp() ne peut pas construire
+  les options par défaut et tout consommateur appelant
+  FirebaseApp.getInstance() pendant le démarrage (hypothèse H1 : injection
+  Hilt dans super.onCreate(), avant tout garde-fou applicatif) lève
+  IllegalStateException -> mort avant fenêtre.
+
+  Le plugin google-services n'étant pas appliqué dans ce chantier, les
+  ressources qu'il générerait normalement sont déclarées ici, à l'identique
+  de noms. Valeurs FICTIVES mais syntaxiquement valides : l'application est
+  100 % hors-ligne (aucune permission INTERNET), Firebase ne contacte aucun
+  serveur ; il s'agit uniquement de permettre l'initialisation locale de
+  l'instance par défaut. Ne jamais y mettre de vraies clés.
+-->
+<resources>
+    <string name="google_app_id" translatable="false">1:123456789012:android:a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4</string>
+    <string name="google_api_key" translatable="false">AIzaSyDUMMYKEY0123456789abcdefghijklmno</string>
+    <string name="gcm_defaultSenderId" translatable="false">123456789012</string>
+    <string name="project_id" translatable="false">assistant-medical-anir</string>
+    <string name="firebase_database_url" translatable="false">https://assistant-medical-anir-default-rtdb.firebaseio.com</string>
+</resources>
