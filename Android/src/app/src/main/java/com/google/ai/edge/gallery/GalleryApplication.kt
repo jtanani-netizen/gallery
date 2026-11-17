@@ -18,6 +18,8 @@ package com.google.ai.edge.gallery
 
 import android.app.Application
 import android.os.Process
+import android.util.Log
+import com.google.ai.edge.gallery.biblio.BiblioRouteur
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.notifications.NotificationScheduleManager
 import com.google.ai.edge.gallery.services.tts.TtsMemoryTrimCallbacks
@@ -49,7 +51,29 @@ class GalleryApplication : Application() {
     // Load saved theme.
     ThemeSettings.themeOverride.value = dataStoreRepository.readTheme()
 
-    FirebaseApp.initializeApp(this)
-    firebaseAnalytics?.setAnalyticsCollectionEnabled(dataStoreRepository.readFirebaseAnalytics())
+    // PHASE C (chantier Anir) : cet APK ne contient AUCUNE configuration
+    // Firebase (pas de google-services.json, donc aucune ressource
+    // google_app_id) : FirebaseApp.initializeApp() y lève
+    // IllegalStateException et tuait le processus avant toute fenêtre
+    // (plantage au démarrage constaté sur l'appareil le 2026-11-16).
+    // L'application est 100 % hors-ligne : Firebase est inerte par
+    // conception, son échec d'initialisation ne doit jamais être fatal.
+    // Si une configuration Firebase existait, le comportement serait
+    // strictement inchangé.
+    try {
+      FirebaseApp.initializeApp(this)
+      firebaseAnalytics?.setAnalyticsCollectionEnabled(dataStoreRepository.readFirebaseAnalytics())
+    } catch (e: Exception) {
+      Log.w(TAG, "Firebase indisponible (aucune configuration) : initialisation ignorée", e)
+    }
+
+    // PHASE B (chantier Anir) : précharger la bibliothèque médicale locale
+    // (copie de l'asset + chargement de l'index inversé) sur un fil
+    // d'arrière-plan, pour que la première question n'attende pas.
+    Thread { BiblioRouteur.precharger(applicationContext) }.start()
+  }
+
+  companion object {
+    private const val TAG = "GalleryApplication"
   }
 }
