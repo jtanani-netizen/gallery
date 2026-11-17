@@ -1,0 +1,70 @@
+name: Build F9 modele embarque (base F8 + modele dans l'APK)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_apk:
+    name: Build Android APK (F9 - delta F8 + patch modele embarque + modele en asset)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Android/src
+    steps:
+      - name: Checkout tag 1.0.23 (exact commit)
+        uses: actions/checkout@v4
+        with:
+          ref: 9cb31cf47c21b0ed76901ff589a52b509803edfa
+          fetch-depth: 0
+      - name: Appliquer le delta F8 + le patch modele embarque (F9)
+        working-directory: .
+        run: |
+          git fetch origin assistant-medical
+          for p in \
+            "Android/src/app/build.gradle.kts" \
+            "Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt" \
+            "Android/src/app/src/main/java/com/google/ai/edge/gallery/biblio/BiblioRouteur.kt" \
+            "Android/src/app/src/main/java/routeur/RouteurBiblio.kt" \
+            "Android/src/app/src/main/java/routeur/DonneesRouteur.kt" \
+            "Android/src/app/src/main/assets/model_allowlist.json" \
+            "Android/src/app/src/main/res/values/firebase_config.xml" \
+            "phaseF-patches/strings-xml.patch" \
+            "phaseF-patches/modelmanager.patch" \
+            "phaseF-patches/sessionmanager.patch" \
+            "phaseF-patches/mainactivity.patch" \
+            "phaseF-patches/manifest-F8.xml" \
+            "phaseF-patches/modele-embarque.patch" \
+          ; do git checkout origin/assistant-medical -- "$p"; done
+          cp phaseF-patches/manifest-F8.xml "Android/src/app/src/main/AndroidManifest.xml"
+          git apply phaseF-patches/strings-xml.patch
+          git apply phaseF-patches/modelmanager.patch
+          git apply phaseF-patches/sessionmanager.patch
+          git apply phaseF-patches/mainactivity.patch
+          git apply phaseF-patches/modele-embarque.patch
+          git status --porcelain
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Install Android SDK Platform 37
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
+      - name: Telecharger la bibliotheque complete (biblio-v2.db, 70 documents)
+        working-directory: .
+        run: |
+          curl -L -o Android/src/app/src/main/assets/biblio.db "https://drive.usercontent.google.com/download?id=1zCD1pbS81PnFt1EhVLi_O6-0hfr6VXav&export=download&confirm=t"
+          echo "f95e9b3623a53947b78745c2df970ff2  Android/src/app/src/main/assets/biblio.db" | md5sum -c -
+      - name: Telecharger le modele Gemma 4 E2B (embarque dans l'APK, asset modeles/)
+        working-directory: .
+        run: |
+          mkdir -p Android/src/app/src/main/assets/modeles
+          curl -L --fail -o Android/src/app/src/main/assets/modeles/gemma-4-E2B-it.litertlm "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/6e5c4f1e395deb959c494953478fa5cec4b8008f/gemma-4-E2B-it.litertlm?download=true"
+          test "$(stat -c %s Android/src/app/src/main/assets/modeles/gemma-4-E2B-it.litertlm)" = "2588147712"
+          echo "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c  Android/src/app/src/main/assets/modeles/gemma-4-E2B-it.litertlm" | sha256sum -c -
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssistantMedical-F9-unsigned
+          path: Android/src/app/build/outputs/apk/release/*.apk
+          retention-days: 7
