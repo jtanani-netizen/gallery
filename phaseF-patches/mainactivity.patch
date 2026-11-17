@@ -1,0 +1,38 @@
+diff --git a/Android/src/app/src/main/java/com/google/ai/edge/gallery/MainActivity.kt b/Android/src/app/src/main/java/com/google/ai/edge/gallery/MainActivity.kt
+index 587003c..950f99a 100644
+--- a/Android/src/app/src/main/java/com/google/ai/edge/gallery/MainActivity.kt
++++ b/Android/src/app/src/main/java/com/google/ai/edge/gallery/MainActivity.kt
+@@ -234,15 +234,24 @@ class MainActivity : ComponentActivity(), VirtualDevicePermissionsHost {
+   override fun onResume() {
+     super.onResume()
+ 
+-    firebaseAnalytics?.logEvent(
+-      FirebaseAnalytics.Event.APP_OPEN,
+-      bundleOf(
+-        "app_version" to BuildConfig.VERSION_NAME,
+-        "app_platform" to "Android",
+-        "os_version" to Build.VERSION.SDK_INT.toString(),
+-        "device_model" to Build.MODEL,
+-      ),
+-    )
++    // PHASE C (chantier Anir) : sans configuration Firebase dans l'APK,
++    // tout accès Analytics au démarrage doit rester inoffensif. Le
++    // garde-fou principal est le délégué protégé d'Analytics.kt ; ce
++    // try/catch est une ceinture supplémentaire sur le chemin de
++    // démarrage (onResume suit immédiatement onCreate).
++    try {
++      firebaseAnalytics?.logEvent(
++        FirebaseAnalytics.Event.APP_OPEN,
++        bundleOf(
++          "app_version" to BuildConfig.VERSION_NAME,
++          "app_platform" to "Android",
++          "os_version" to Build.VERSION.SDK_INT.toString(),
++          "device_model" to Build.MODEL,
++        ),
++      )
++    } catch (e: Exception) {
++      Log.w(TAG, "Firebase Analytics indisponible : événement APP_OPEN ignoré", e)
++    }
+   }
+ 
+   companion object {
