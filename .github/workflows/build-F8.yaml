@@ -1,0 +1,60 @@
+name: Build F8 isole INTERNET (bisection)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_apk:
+    name: Build Android APK (F8 - tout restaure sauf INTERNET)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Android/src
+    steps:
+      - name: Checkout tag 1.0.23 (exact commit)
+        uses: actions/checkout@v4
+        with:
+          ref: 9cb31cf47c21b0ed76901ff589a52b509803edfa
+          fetch-depth: 0
+      - name: Appliquer le delta F8 (code + biblio + manifeste F8)
+        working-directory: .
+        run: |
+          git fetch origin assistant-medical
+          for p in \
+            "Android/src/app/build.gradle.kts" \
+            "Android/src/app/src/main/java/com/google/ai/edge/gallery/GalleryApplication.kt" \
+            "Android/src/app/src/main/java/com/google/ai/edge/gallery/biblio/BiblioRouteur.kt" \
+            "Android/src/app/src/main/java/routeur/RouteurBiblio.kt" \
+            "Android/src/app/src/main/java/routeur/DonneesRouteur.kt" \
+            "Android/src/app/src/main/assets/model_allowlist.json" \
+            "Android/src/app/src/main/res/values/firebase_config.xml" \
+            "phaseF-patches/strings-xml.patch" \
+            "phaseF-patches/modelmanager.patch" \
+            "phaseF-patches/sessionmanager.patch" \
+            "phaseF-patches/mainactivity.patch" \
+            "phaseF-patches/manifest-F8.xml" \
+          ; do git checkout origin/assistant-medical -- "$p"; done
+          cp phaseF-patches/manifest-F8.xml "Android/src/app/src/main/AndroidManifest.xml"
+          git apply phaseF-patches/strings-xml.patch
+          git apply phaseF-patches/modelmanager.patch
+          git apply phaseF-patches/sessionmanager.patch
+          git apply phaseF-patches/mainactivity.patch
+          git status --porcelain
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Install Android SDK Platform 37
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
+      - name: Telecharger la bibliotheque complete (biblio-v2.db, 70 documents)
+        working-directory: .
+        run: |
+          curl -L -o Android/src/app/src/main/assets/biblio.db "https://drive.usercontent.google.com/download?id=1zCD1pbS81PnFt1EhVLi_O6-0hfr6VXav&export=download&confirm=t"
+          echo "f95e9b3623a53947b78745c2df970ff2  Android/src/app/src/main/assets/biblio.db" | md5sum -c -
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssistantMedical-F8-unsigned
+          path: Android/src/app/build/outputs/apk/release/*.apk
