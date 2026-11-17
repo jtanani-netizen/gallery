@@ -1,0 +1,39 @@
+name: Build F2 identite seule (bisection)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_apk:
+    name: Build Android APK (F2 - tag 1.0.23 + identite seule)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Android/src
+    steps:
+      - name: Checkout tag 1.0.23 (exact commit)
+        uses: actions/checkout@v4
+        with:
+          ref: 9cb31cf47c21b0ed76901ff589a52b509803edfa
+          fetch-depth: 0
+      - name: Appliquer le delta F2 (identite seule)
+        working-directory: .
+        run: |
+          git fetch origin assistant-medical
+          git checkout origin/assistant-medical -- "Android/src/app/build.gradle.kts"
+          git checkout origin/assistant-medical -- "phaseF-patches/strings-xml.patch"
+          git apply phaseF-patches/strings-xml.patch
+          git status --porcelain
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Install Android SDK Platform 37
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssistantMedical-F2-unsigned
+          path: Android/src/app/build/outputs/apk/release/*.apk
